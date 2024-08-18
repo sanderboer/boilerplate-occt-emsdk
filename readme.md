@@ -53,6 +53,7 @@ OpenCascadeProject/
 ├─── deps/                  # Project dependencies directory (generated during the setup process)
 ├──── build/                 # Build directory (generated during the build process)
 └──── dist/                 # Output directory (generated during the build and install process)
+```
 
 ## Alternative Setup
 Once emsdk has been bootstrapped with freetype support, OpenCascade can also be initialized using the ExternalProject_Add mechanism.
