@@ -1,0 +1,41 @@
+cmake_minimum_required(VERSION 3.5)
+
+project(occt)
+
+include(ExternalProject)
+
+# Expect EMSDK_DIR to be passed from the parent scope
+if(NOT EMSDK_DIR)
+    message(FATAL_ERROR "EMSDK_DIR is not set. Ensure that the emsdk project is built first.")
+endif()
+
+ExternalProject_Add(
+    OCCT
+    GIT_REPOSITORY https://github.com/Open-Cascade-SAS/OCCT.git
+    GIT_TAG V7_8_1
+    CMAKE_ARGS
+        -DCMAKE_BUILD_TYPE:STRING=Release
+        -DCMAKE_CXX_FLAGS:STRING=${CMAKE_CXX_FLAGS}
+        -DCMAKE_C_FLAGS:STRING=${CMAKE_C_FLAGS}
+    CMAKE_CACHE_ARGS
+        -DCMAKE_TOOLCHAIN_FILE:FILEPATH=${CMAKE_TOOLCHAIN_FILE}
+        -DCMAKE_EXE_LINKER_FLAGS:STRING=${CMAKE_EXE_LINKER_FLAGS}
+        -DBUILD_LIBRARY_TYPE:STRING=Static
+        -DBUILD_MODULE_ApplicationFramework:BOOL=ON
+        -DBUILD_MODULE_DETools:BOOL=OFF
+        -DBUILD_MODULE_DataExchange:BOOL=ON
+        -DBUILD_MODULE_Draw:BOOL=OFF
+        -DBUILD_MODULE_FoundationClasses:BOOL=ON
+        -DBUILD_MODULE_ModelingAlgorithms:BOOL=ON
+        -DBUILD_MODULE_ModelingData:BOOL=ON
+        -DBUILD_MODULE_Visualization:BOOL=ON
+        -DBUILD_DOC_Overview:BOOL=OFF
+        -DBUILD_SAMPLES_QT:BOOL=OFF
+    BUILD_IN_SOURCE 1
+    UPDATE_DISCONNECTED 1
+    BUILD_COMMAND ${CMAKE_COMMAND} --build . -- -j${NUM_BUILD_THREADS}
+)
+
+# Export OCCT_INSTALL_DIR for use in the main project
+set(OCCT_INSTALL_DIR ${CMAKE_INSTALL_PREFIC} PARENT_SCOPE)
+

@@ -1,0 +1,158 @@
+cmake_minimum_required(VERSION 3.5)  # Updated to version 3.5
+cmake_policy(SET CMP0114 NEW)
+
+project(occt-webgl-sample)
+
+set(APP_VERSION_MAJOR 1)
+set(APP_VERSION_MINOR 0)
+set(APP_TARGET occt-webgl-sample)
+
+# Automatically detect the number of available logical cores and use all minus one
+cmake_host_system_information(RESULT NUM_CORES QUERY NUMBER_OF_LOGICAL_CORES)
+math(EXPR NUM_BUILD_THREADS "${NUM_CORES} - 1")
+message(STATUS "Detected ${NUM_CORES} logical cores, using ${NUM_BUILD_THREADS} build threads.")
+
+set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -s USE_FREETYPE=1")
+set(CMAKE_C_FLAGS "${CMAKE_C_FLAGS} -s USE_FREETYPE=1")
+set(CMAKE_EXE_LINKER_FLAGS "${CMAKE_EXE_LINKER_FLAGS} -s USE_FREETYPE=1")
+
+include(ExternalProject)
+
+# Step 1: Download emsdk (if not already downloaded)
+ExternalProject_Add(emsdk_download
+    GIT_REPOSITORY https://github.com/emscripten-core/emsdk.git
+    GIT_TAG        main
+    CONFIGURE_COMMAND ""
+    BUILD_COMMAND ""
+    INSTALL_COMMAND ""
+    BUILD_IN_SOURCE 1
+    LOG_DOWNLOAD ON
+    LOG_UPDATE ON
+    LOG_CONFIGURE ON
+    LOG_BUILD ON
+    LOG_INSTALL ON
+)
+ExternalProject_Get_Property(emsdk_download SOURCE_DIR)
+
+set(EMSDK_SCRIPT "${SOURCE_DIR}/emsdk")
+set(CMAKE_TOOLCHAIN_FILE "${SOURCE_DIR}/upstream/emscripten/cmake/Modules/Platform/Emscripten.cmake")
+message(STATUS "CMAKE_TOOLCHAIN_FILE = ${CMAKE_TOOLCHAIN_FILE}")
+
+# Step 2: Install emsdk (if not already installed)
+ExternalProject_Add(emsdk_install
+    DOWNLOAD_COMMAND ""
+    SOURCE_DIR ${SOURCE_DIR}
+    CONFIGURE_COMMAND ""
+    BUILD_COMMAND ${CMAKE_COMMAND} -E echo "Installing emsdk..."
+    INSTALL_COMMAND ${EMSDK_SCRIPT} install latest
+    BUILD_IN_SOURCE 1
+    LOG_INSTALL ON
+)
+add_dependencies(emsdk_install emsdk_download)
+
+# Step 3: Activate emsdk (if not already activated)
+ExternalProject_Add(emsdk_activate
+    DOWNLOAD_COMMAND ""
+    SOURCE_DIR ${SOURCE_DIR}
+    CONFIGURE_COMMAND ""
+    BUILD_COMMAND ${CMAKE_COMMAND} -E echo "Activating emsdk..."
+    INSTALL_COMMAND ${EMSDK_SCRIPT} activate latest
+    BUILD_IN_SOURCE 1
+    LOG_INSTALL ON
+)
+add_dependencies(emsdk_activate emsdk_install)
+
+# Create step targets for emsdk activation
+ExternalProject_Add_StepTargets(emsdk_activate install)
+
+# Ensure emsdk is ready before any other builds
+add_custom_target(activate_emsdk ALL
+    DEPENDS emsdk_activate-install
+    COMMAND ${CMAKE_COMMAND} -E echo "emsdk setup complete."
+)
+
+# Step 5: Build OCCT with FreeType and Emscripten (if not already built)
+ExternalProject_Add(
+    OCCT
+    GIT_REPOSITORY https://github.com/Open-Cascade-SAS/OCCT.git
+    GIT_TAG V7_8_1
+    CMAKE_ARGS
+        -DCMAKE_BUILD_TYPE=Release
+        -DCMAKE_INSTALL_PREFIX=/opt/emsdk-occt-git
+    CMAKE_CACHE_ARGS
+        -DCMAKE_TOOLCHAIN_FILE:FILEPATH=${CMAKE_TOOLCHAIN_FILE}
+        -DBUILD_LIBRARY_TYPE:STRING=Static
+        -DBUILD_MODULE_ApplicationFramework:BOOL=ON
+        -DBUILD_MODULE_Visualization:BOOL=ON
+        -DBUILD_MODULE_Draw:BOOL=OFF
+        -DBUILD_MODULE_DETools:BOOL=OFF
+        -DBUILD_MODULE_FoundationClasses:BOOL=ON
+        -DBUILD_MODULE_DataExchange:BOOL=ON
+        -DBUILD_MODULE_ModelingAlgorithms:BOOL=ON
+        -DBUILD_MODULE_ModelingData:BOOL=ON
+        -DBUILD_DOC_Overview:BOOL=OFF
+        -DBUILD_SAMPLES_QT:BOOL=OFF
+        # -DCMAKE_CXX_FLAGS:STRING="${CMAKE_CXX_FLAGS} -s USE_FREETYPE=1" 
+        # -DCMAKE_C_FLAGS:STRING="${CMAKE_C_FLAGS} -s USE_FREETYPE=1" 
+        # -DCMAKE_EXE_LINKER_FLAGS:STRING="${CMAKE_EXE_LINKER_FLAGS} -s USE_FREETYPE=1" 
+
+    BUILD_IN_SOURCE 1
+    UPDATE_DISCONNECTED 1
+    BUILD_COMMAND ${CMAKE_COMMAND} --build . -- -j${NUM_BUILD_THREADS}
+    INSTALL_COMMAND ${CMAKE_COMMAND} --build . --target install
+)
+add_dependencies(OCCT emsdk_activate-install)
+
+# Create step targets for OCCT
+ExternalProject_Add_StepTargets(OCCT install)
+
+# Set OpenCASCADE_DIR to find the OCCT installation
+set(OpenCASCADE_DIR "/opt/emsdk-occt-git")
+find_package(OpenCASCADE REQUIRED)
+
+# Step 6: Define the main project target
+add_executable(${APP_TARGET} src/WasmOcctView.cpp src/main.cpp)
+
+# Ensure the main project builds after all dependencies
+add_dependencies(${APP_TARGET} OCCT-install emsdk_activate-install)
+
+# Linker flags setup
+set(CMAKE_EXE_LINKER_FLAGS "${CMAKE_EXE_LINKER_FLAGS} -s WASM=1")
+# set(CMAKE_EXE_LINKER_FLAGS "${CMAKE_EXE_LINKER_FLAGS} -s USE_FREETYPE=1")
+set(CMAKE_EXE_LINKER_FLAGS "${CMAKE_EXE_LINKER_FLAGS} -s MAX_WEBGL_VERSION=2")
+set(CMAKE_EXE_LINKER_FLAGS "${CMAKE_EXE_LINKER_FLAGS} -s MODULARIZE=1")
+set(CMAKE_EXE_LINKER_FLAGS "${CMAKE_EXE_LINKER_FLAGS} -s EXPORT_NAME='createOccViewerModule'")
+set(CMAKE_EXE_LINKER_FLAGS "${CMAKE_EXE_LINKER_FLAGS} -s ALLOW_MEMORY_GROWTH=1")
+set(CMAKE_EXE_LINKER_FLAGS "${CMAKE_EXE_LINKER_FLAGS} --extern-post-js ${CMAKE_CURRENT_SOURCE_DIR}/occt-webgl-viewer.js")
+
+# Link the libraries
+target_link_libraries(${APP_TARGET}
+    ${OpenCASCADE_LIBS}
+    freetype
+)
+
+# Custom target for building only the main project
+add_custom_target(build_main
+    DEPENDS ${APP_TARGET}
+)
+
+# Installation setup
+set(CMAKE_INSTALL_PREFIX "/opt/occt-webgl")
+install(TARGETS ${APP_TARGET} RUNTIME DESTINATION "${CMAKE_INSTALL_PREFIX}" LIBRARY DESTINATION "${CMAKE_INSTALL_PREFIX}")
+install(FILES ${CMAKE_CURRENT_BINARY_DIR}/${APP_TARGET}.wasm DESTINATION ${CMAKE_INSTALL_PREFIX})
+install(FILES occt-webgl-sample.html DESTINATION ${CMAKE_INSTALL_PREFIX})
+install(FILES ${OpenCASCADE_RESOURCE_DIR}/DrawResources/OCC_logo.png  DESTINATION ${CMAKE_INSTALL_PREFIX})
+install(FILES ${OpenCASCADE_RESOURCE_DIR}/DrawResources/lamp.ico      DESTINATION ${CMAKE_INSTALL_PREFIX})
+if (CMAKE_CXX_FLAGS MATCHES "-pthread")
+  install(FILES ${CMAKE_CURRENT_BINARY_DIR}/${APP_TARGET}.worker.js DESTINATION ${CMAKE_INSTALL_PREFIX})
+endif()
+
+# Optional: Custom target to clean external project marker files
+add_custom_target(clean_external_projects
+    COMMAND ${CMAKE_COMMAND} -E rm -f "${CMAKE_BINARY_DIR}/emsdk_download_complete"
+    COMMAND ${CMAKE_COMMAND} -E rm -f "${CMAKE_BINARY_DIR}/emsdk_install_complete"
+    COMMAND ${CMAKE_COMMAND} -E rm -f "${CMAKE_BINARY_DIR}/emsdk_activate_complete"
+    COMMAND ${CMAKE_COMMAND} -E rm -f "${CMAKE_BINARY_DIR}/occt_build_complete"
+    COMMAND ${CMAKE_COMMAND} -E echo "External projects clean."
+)
+

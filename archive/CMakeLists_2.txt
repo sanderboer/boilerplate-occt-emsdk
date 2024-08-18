@@ -1,0 +1,187 @@
+cmake_minimum_required(VERSION 3.5)
+
+cmake_policy(SET CMP0114 NEW)
+
+project(occt-webgl-sample)
+
+#set(OCCT_INSTALL_DIR ${CMAKE_BINARY_DIR}/occt)
+set(OCCT_INSTALL_DIR /opt/emsdk-occt-git)
+
+set(APP_VERSION_MAJOR 1)
+set(APP_VERSION_MINOR 0)
+set(APP_TARGET occt-webgl-sample)
+set(NUM_BUILD_THREADS 12)
+
+set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -s USE_FREETYPE=1")
+set(CMAKE_C_FLAGS "${CMAKE_C_FLAGS} -s USE_FREETYPE=1")
+set(CMAKE_EXE_LINKER_FLAGS "${CMAKE_EXE_LINKER_FLAGS} -s USE_FREETYPE=1")
+
+# Some hack to force finding our opencascade install
+set(OpenCASCADE_DIR "${OCCT_INSTALL_DIR}/lib/cmake/opencascade" CACHE PATH "Custom OpenCASCADE directory" FORCE)
+# # Clear any conflicting cache entries
+unset(OpenCASCADE_DIR CACHE)
+# Set OpenCASCADE_DIR with FORCE to ensure it overrides any system settings
+set(OpenCASCADE_DIR "${OCCT_INSTALL_DIR}/lib/cmake/opencascade" CACHE PATH "Custom OpenCASCADE directory" FORCE)
+# Verify that the correct OpenCASCADE_DIR is set
+message(STATUS "Using OpenCASCADE_DIR: ${OpenCASCADE_DIR}")
+
+# Open CASCADE Technology
+find_package(OpenCASCADE REQUIRED NO_DEFAULT_PATH)
+if(OpenCASCADE_FOUND)
+  message (STATUS "Using OpenCASCADE from \"${OpenCASCADE_DIR}\"" )
+  INCLUDE_DIRECTORIES(${OpenCASCADE_INCLUDE_DIR})
+  LINK_DIRECTORIES(${OpenCASCADE_LIBRARY_DIR})
+else()
+  message(WARNING "Could not find OpenCASCADE, please set OpenCASCADE_DIR variable." )
+  set(OCCT_LIBRARY_DIR)
+  set(OCCT_BIN_DIR)
+endif()
+
+set(OpenCASCADE_LIBS TKRWMesh TKDEGLTF TKDEOBJ TKDEPLY TKBinXCAF TKBin TKBinL TKOpenGles TKXCAF TKVCAF TKCAF TKV3d TKHLR TKMesh TKService TKShHealing TKPrim TKTopAlgo TKGeomAlgo TKBRep TKGeomBase TKG3d TKG2d TKMath TKLCAF TKCDF TKernel)
+
+
+include(ExternalProject)
+
+# Step 1: Download emsdk (no shell commands directly)
+ExternalProject_Add(emsdk_download
+    GIT_REPOSITORY https://github.com/emscripten-core/emsdk.git
+    GIT_TAG        main
+    CONFIGURE_COMMAND ""
+    BUILD_COMMAND ""
+    INSTALL_COMMAND ""
+)
+
+ExternalProject_Get_Property(emsdk_download SOURCE_DIR)
+set(EMSDK_SCRIPT "${SOURCE_DIR}/emsdk")
+set(CMAKE_TOOLCHAIN_FILE "${SOURCE_DIR}/upstream/emscripten/cmake/Modules/Platform/Emscripten.cmake" CACHE FILEPATH "Emscripten toolchain file")
+unset(CMAKE_TOOLCHAIN_FILE CACHE)
+set(CMAKE_TOOLCHAIN_FILE "${SOURCE_DIR}/upstream/emscripten/cmake/Modules/Platform/Emscripten.cmake" CACHE FILEPATH "Emscripten toolchain file")
+# Add Emscripten include paths manually if necessary
+# include_directories("${SOURCE_DIR}/upstream/emscripten/system/include")
+# set(CMAKE_TOOLCHAIN_FILE "/Projects/Github/boilerplate-occt-cmake/build/emsdk_download-prefix/src/emsdk_download/upstream/emscripten/cmake/Modules/Platform/Emscripten.cmake")
+
+message(STATUS "CMAKE_TOOLCHAIN_FILE = ${CMAKE_TOOLCHAIN_FILE}")
+
+# Step 2: Install emsdk
+ExternalProject_Add(emsdk_install
+    DOWNLOAD_COMMAND ""
+    SOURCE_DIR ${SOURCE_DIR}
+    CONFIGURE_COMMAND ""
+    BUILD_COMMAND ${CMAKE_COMMAND} -E echo "Installing emsdk..."
+    INSTALL_COMMAND ${EMSDK_SCRIPT} install latest
+    BUILD_IN_SOURCE 1
+    LOG_INSTALL ON
+)
+
+# Step 3: Activate emsdk
+ExternalProject_Add(emsdk_activate
+    DOWNLOAD_COMMAND ""
+    SOURCE_DIR ${SOURCE_DIR}
+    CONFIGURE_COMMAND ""
+    BUILD_COMMAND ${CMAKE_COMMAND} -E echo "Activating emsdk..."
+    INSTALL_COMMAND ${EMSDK_SCRIPT} activate latest
+    BUILD_IN_SOURCE 1
+    LOG_INSTALL ON
+)
+
+add_dependencies(emsdk_install emsdk_download)
+add_dependencies(emsdk_activate emsdk_install)
+
+# Ensure emsdk is ready before any other builds
+add_custom_target(activate_emsdk ALL
+    DEPENDS emsdk_activate
+    COMMAND ${CMAKE_COMMAND} -E echo "emsdk setup complete."
+)
+
+# Step 5: Build OCCT with FreeType and Emscripten
+ExternalProject_Add(
+    OCCT
+    GIT_REPOSITORY https://github.com/Open-Cascade-SAS/OCCT.git
+    GIT_TAG V7_8_1
+    CMAKE_ARGS
+        -DCMAKE_BUILD_TYPE:STRING=Release  
+        -DCMAKE_INSTALL_PREFIX:STRING=${OCCT_INSTALL_DIR}
+    CMAKE_CACHE_ARGS
+        -DCMAKE_TOOLCHAIN_FILE=${CMAKE_TOOLCHAIN_FILE}
+        -DCMAKE_BUILD_TYPE:STRING=Release  
+        -DCMAKE_INSTALL_PREFIX:STRING=${OCCT_INSTALL_DIR}
+        -DBUILD_LIBRARY_TYPE:STRING=Static 
+        -DBUILD_MODULE_ApplicationFramework:BOOL=ON 
+        -DBUILD_MODULE_DETools:BOOL=OFF 
+        -DBUILD_MODULE_DataExchange:BOOL=ON 
+        -DBUILD_MODULE_Draw:BOOL=OFF 
+        -DBUILD_MODULE_FoundationClasses:BOOL=ON 
+        -DBUILD_MODULE_ModelingAlgorithms:BOOL=ON 
+        -DBUILD_MODULE_ModelingData:BOOL=ON 
+        -DBUILD_MODULE_Visualization:BOOL=ON 
+        -DBUILD_DOC_Overview:BOOL=OFF 
+        -DBUILD_SAMPLES_QT:BOOL=OFF 
+        # -DCMAKE_CXX_FLAGS="${CMAKE_CXX_FLAGS} -s USE_FREETYPE=1" 
+        # -DCMAKE_C_FLAGS="${CMAKE_C_FLAGS} -s USE_FREETYPE=1" 
+        # -DCMAKE_EXE_LINKER_FLAGS="${CMAKE_EXE_LINKER_FLAGS} -s USE_FREETYPE=1" 
+   
+    BUILD_IN_SOURCE 1
+    UPDATE_DISCONNECTED 1
+    BUILD_COMMAND ${CMAKE_COMMAND} --build . -- -j${NUM_BUILD_THREADS}
+)
+add_dependencies(OCCT emsdk_activate)
+
+# option to enable or disable use of precompiled headers
+if (NOT DEFINED SOURCE_MAP_BASE)
+  set (SOURCE_MAP_BASE "" CACHE STRING "Path to source map server for debugging C++ code; e.g. http://localhost:9090/")
+endif()
+
+# customize build
+set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} --bind")
+if (NOT "${SOURCE_MAP_BASE}" STREQUAL "")
+  set(CMAKE_CXX_FLAGS_DEBUG "-g4 --source-map-base ${SOURCE_MAP_BASE}")
+endif()
+
+set(CMAKE_EXE_LINKER_FLAGS "${CMAKE_EXE_LINKER_FLAGS} -s WASM=1")
+set(CMAKE_EXE_LINKER_FLAGS "${CMAKE_EXE_LINKER_FLAGS} -s MAX_WEBGL_VERSION=2")
+set(CMAKE_EXE_LINKER_FLAGS "${CMAKE_EXE_LINKER_FLAGS} -s MODULARIZE=1")
+set(CMAKE_EXE_LINKER_FLAGS "${CMAKE_EXE_LINKER_FLAGS} -s EXPORT_NAME='createOccViewerModule'")
+set(CMAKE_EXE_LINKER_FLAGS "${CMAKE_EXE_LINKER_FLAGS} -s ALLOW_MEMORY_GROWTH=1")
+set(CMAKE_EXE_LINKER_FLAGS "${CMAKE_EXE_LINKER_FLAGS} --extern-post-js ${CMAKE_CURRENT_SOURCE_DIR}/occt-webgl-viewer.js")
+
+INCLUDE_DIRECTORIES(${PROJECT_SOURCE_DIR})
+
+file(GLOB HEADER_FILES "src/*.h")
+file(GLOB SOURCE_FILES "src/*.cpp")
+source_group("Headers" FILES ${HEADER_FILES})
+source_group("Sources" FILES ${SOURCE_FILES})
+add_executable(${APP_TARGET} ${SOURCE_FILES} ${HEADER_FILES})
+
+# Custom target for building only the main project
+add_custom_target(build_main
+    DEPENDS ${APP_TARGET}
+)
+
+target_link_libraries(
+  ${APP_TARGET}
+  ${OpenCASCADE_LIBS}
+  freetype
+)
+
+# Ensure the main project builds after all dependencies
+add_dependencies(${APP_TARGET} OCCT emsdk_activate)
+
+# Link the libraries
+target_link_libraries(${APP_TARGET}
+    ${OpenCASCADE_LIBS}
+    freetype
+)
+
+install(TARGETS ${PROJECT_NAME} RUNTIME DESTINATION "${CMAKE_INSTALL_PREFIX}" LIBRARY DESTINATION "${CMAKE_INSTALL_PREFIX}")
+install(FILES ${CMAKE_CURRENT_BINARY_DIR}/${PROJECT_NAME}.wasm DESTINATION ${CMAKE_INSTALL_PREFIX})
+if (NOT "${SOURCE_MAP_BASE}" STREQUAL "")
+  if ("${CMAKE_BUILD_TYPE}" STREQUAL "Debug")
+    install(FILES ${CMAKE_CURRENT_BINARY_DIR}/${PROJECT_NAME}.wasm.map DESTINATION ${CMAKE_INSTALL_PREFIX})
+  endif()
+endif()
+install(FILES occt-webgl-sample.html DESTINATION ${CMAKE_INSTALL_PREFIX})
+install(FILES ${OpenCASCADE_RESOURCE_DIR}/DrawResources/OCC_logo.png  DESTINATION ${CMAKE_INSTALL_PREFIX})
+install(FILES ${OpenCASCADE_RESOURCE_DIR}/DrawResources/lamp.ico      DESTINATION ${CMAKE_INSTALL_PREFIX})
+if (CMAKE_CXX_FLAGS MATCHES "-pthread")
+  endif()
+  install(FILES ${CMAKE_CURRENT_BINARY_DIR}/${PROJECT_NAME}.worker.js DESTINATION ${CMAKE_INSTALL_PREFIX})
