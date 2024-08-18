@@ -23,7 +23,7 @@ python -m http.server
 This starts a local http server on port 8000.
 Open  a browser to http://localhost:8000/occt-webgl-sample.html in your browser to see the project in action:
 
-[[./scripts/screenshot.png]]
+![screenshot](./scripts/screenshot.png)
 ## Features
 
 - **bootstrap Emscripten with freetype**: Downloads and activates Emscripten to bootstrap Emscripten with freetype support.
